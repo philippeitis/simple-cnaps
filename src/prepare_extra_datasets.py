@@ -1,5 +1,6 @@
 import os
 import sys
+
 sys.path.append(os.path.abspath(os.environ['META_DATASET_ROOT']))
 from meta_dataset.data import learning_spec
 from meta_dataset.dataset_conversion.dataset_to_records import DatasetConverter, write_tfrecord_from_directory
@@ -7,8 +8,10 @@ from PIL import Image
 from six.moves import range
 import gzip
 import numpy as np
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Quiet the TensorFlow warnings
 import tensorflow as tf
+
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)  # Quiet the TensorFlow warnings
 import pickle
 
@@ -29,7 +32,8 @@ class ExtraDatasetConverter(DatasetConverter):
             class_directory = os.path.join(self.data_root, class_name)
             class_records_path = os.path.join(self.records_path, self.dataset_spec.file_pattern.format(class_id))
             self.class_names[class_id] = class_name
-            self.images_per_class[class_id] = write_tfrecord_from_directory(class_directory, class_id, class_records_path)
+            self.images_per_class[class_id] = write_tfrecord_from_directory(class_directory, class_id,
+                                                                            class_records_path)
 
 
 def process_cifar(src_path, dst_path, imagesFileName, labelsFileName, labelKey1, labelKey2):
@@ -114,12 +118,12 @@ def main():
     print('Processing MNIST test set.')
     process_mnist(datasrc_path)
     converter = ExtraDatasetConverter(
-        name = 'mnist',
-        data_root = os.path.join(datasrc_path, 'mnist'),
-        has_superclasses = False,
-        records_path = os.path.join(records_path, 'mnist'),
-        split_file = os.path.join(splits_path, 'mnist_splits.json'),
-        random_seed = 22
+        name='mnist',
+        data_root=os.path.join(datasrc_path, 'mnist'),
+        has_superclasses=False,
+        records_path=os.path.join(records_path, 'mnist'),
+        split_file=os.path.join(splits_path, 'mnist_splits.json'),
+        random_seed=22
     )
     converter.convert_dataset()
 
@@ -137,7 +141,7 @@ def main():
         data_root=os.path.join(datasrc_path, 'cifar10'),
         has_superclasses=False,
         records_path=os.path.join(records_path, 'cifar10'),
-        split_file = os.path.join(splits_path, 'cifar10_splits.json'),
+        split_file=os.path.join(splits_path, 'cifar10_splits.json'),
         random_seed=22
     )
     converter.convert_dataset()
@@ -156,7 +160,7 @@ def main():
         data_root=os.path.join(datasrc_path, 'cifar100'),
         has_superclasses=False,
         records_path=os.path.join(records_path, 'cifar100'),
-        split_file = os.path.join(splits_path, 'cifar100_splits.json'),
+        split_file=os.path.join(splits_path, 'cifar100_splits.json'),
         random_seed=22
     )
     converter.convert_dataset()
@@ -166,4 +170,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
