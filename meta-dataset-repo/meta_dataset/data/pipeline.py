@@ -244,7 +244,7 @@ def simclr_augment(image_batch, blur=False):
 
 
 @gin.configurable(
-    whitelist=['support_data_augmentation', 'query_data_augmentation'])
+    allowlist=['support_data_augmentation', 'query_data_augmentation'])
 def process_episode(example_strings,
                     class_ids,
                     chunk_sizes,
@@ -280,8 +280,8 @@ def process_episode(example_strings,
       query_labels, query_class_ids: Tensors, batches of images, labels, and
       (absolute) class IDs, for the support and query sets (respectively).
   """
-  _log_data_augmentation(support_data_augmentation, 'support')
-  _log_data_augmentation(query_data_augmentation, 'query')
+  log_data_augmentation(support_data_augmentation, 'support')
+  log_data_augmentation(query_data_augmentation, 'query')
   flush_chunk_size, support_chunk_size, _ = chunk_sizes
   support_start = flush_chunk_size
   query_start = support_start + support_chunk_size
@@ -297,7 +297,7 @@ def process_episode(example_strings,
   support_strings = example_strings[support_start:query_start]
   support_class_ids = class_ids[support_start:query_start]
   (support_strings,
-   support_class_ids) = filter_dummy_examples(support_strings,
+   support_class_ids) = filter_placeholders(support_strings,
                                               support_class_ids)
   support_images = tf.map_fn(
       support_map_fn, support_strings, dtype=tf.float32, back_prop=False)
@@ -305,7 +305,7 @@ def process_episode(example_strings,
   query_strings = example_strings[query_start:]
   query_class_ids = class_ids[query_start:]
   (query_strings,
-   query_class_ids) = filter_dummy_examples(query_strings, query_class_ids)
+   query_class_ids) = filter_placeholders(query_strings, query_class_ids)
   query_images = tf.map_fn(
       query_map_fn, query_strings, dtype=tf.float32, back_prop=False)
 
@@ -317,7 +317,7 @@ def process_episode(example_strings,
           query_labels, query_class_ids)
 
 
-@gin.configurable(whitelist=['batch_data_augmentation'])
+@gin.configurable(allowlist=['batch_data_augmentation'])
 def process_batch(example_strings,
                   class_ids,
                   image_size,
@@ -340,7 +340,7 @@ def process_batch(example_strings,
   Returns:
     images, labels: Tensors, a batch of image and labels.
   """
-  _log_data_augmentation(batch_data_augmentation, 'batch')
+  log_data_augmentation(batch_data_augmentation, 'batch')
   map_fn = functools.partial(
       process_example,
       image_size=image_size,
