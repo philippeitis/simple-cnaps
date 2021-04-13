@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2019 The Meta-Dataset Authors.
+# Copyright 2021 The Meta-Dataset Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,8 +33,10 @@ from __future__ import division
 from __future__ import print_function
 
 import collections
+
+from absl import logging
 from meta_dataset.dataset_conversion import dataset_to_records
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 
 tf.flags.DEFINE_string(
     'mini_imagenet_records_dir',
@@ -142,9 +144,8 @@ def main(argv):
       name=FLAGS.dataset,
       data_root=converter_args.data_root,
       records_path=records_path)
-  tf.logging.info(
-      'Creating {} specification and records in directory {}...'.format(
-          converter_args.long_name, converter.records_path))
+  logging.info('Creating %s specification and records in directory %s...',
+               converter_args.long_name, converter.records_path)
   converter.convert_dataset()
 
 
