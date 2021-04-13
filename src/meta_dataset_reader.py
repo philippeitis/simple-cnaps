@@ -93,10 +93,10 @@ class MetaDatasetReader:
     def _get_task(self, next_task, session):
         episode = session.run(next_task)
         task_dict = {
-            'context_images': episode[0],
-            'context_labels': episode[1],
-            'target_images': episode[3],
-            'target_labels': episode[4]
+            'context_images': episode[0][0],
+            'context_labels': episode[0][1],
+            'target_images': episode[0][3],
+            'target_labels': episode[0][4]
             }
         return task_dict
 
@@ -140,6 +140,3 @@ class MetaDatasetReader:
             ignore_dag_ontology=False,
             ignore_bilevel_ontology=False
         )
-
-
-
