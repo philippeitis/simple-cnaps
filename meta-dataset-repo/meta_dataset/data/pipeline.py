@@ -405,8 +405,7 @@ def make_one_source_episode_pipeline(dataset_spec,
                                      read_buffer_size_bytes=None,
                                      num_prefetch=0,
                                      image_size=None,
-                                     num_to_take=None,
-                                     ignore_hierarchy_probability=0.0):
+                                     num_to_take=None):
   """Returns a pipeline emitting data from one single source as Episodes.
 
   Args:
@@ -430,9 +429,6 @@ def make_one_source_episode_pipeline(dataset_spec,
       each class' tfrecord. If specified, the available images of each class
       will be restricted to that int. By default no restriction is applied and
       all data is used.
-    ignore_hierarchy_probability: Float, if using a hierarchy, this flag makes
-      the sampler ignore the hierarchy for this proportion of episodes and
-      instead sample categories uniformly.
 
   Returns:
     A Dataset instance that outputs tuples of fully-assembled and decoded
@@ -456,8 +452,7 @@ def make_one_source_episode_pipeline(dataset_spec,
       pool=pool,
       use_dag_hierarchy=use_dag_ontology,
       use_bilevel_hierarchy=use_bilevel_ontology,
-      use_all_classes=use_all_classes,
-      ignore_hierarchy_probability=ignore_hierarchy_probability)
+      use_all_classes=use_all_classes)
   dataset = episode_reader.create_dataset_input_pipeline(sampler, pool=pool)
   # Episodes coming out of `dataset` contain flushed examples and are internally
   # padded with placeholder examples. `process_episode` discards flushed
