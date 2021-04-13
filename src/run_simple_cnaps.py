@@ -17,6 +17,7 @@ VALIDATION_FREQUENCY = 10000
 
 
 def main():
+    tf.compat.v1.disable_eager_execution()
     learner = Learner()
     learner.run()
 
