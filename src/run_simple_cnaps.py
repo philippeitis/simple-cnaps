@@ -6,8 +6,10 @@ import sys
 from utils import print_and_log, get_log_files, ValidationAccuracies, loss, aggregate_accuracy
 from model import SimpleCnaps
 from meta_dataset_reader import MetaDatasetReader
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Quiet TensorFlow warnings
 import tensorflow as tf
+
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)  # Quiet TensorFlow warnings
 
 NUM_TRAIN_TASKS = 110000
@@ -53,8 +55,8 @@ class Learner:
             model.distribute_model()
         return model
 
-    def init_data(self):
-
+    @staticmethod
+    def init_data():
         # train_set = ['ilsvrc_2012', 'omniglot', 'aircraft', 'cu_birds', 'dtd', 'quickdraw', 'fungi', 'vgg_flower']
         # validation_set = ['ilsvrc_2012', 'omniglot', 'aircraft', 'cu_birds', 'dtd', 'quickdraw', 'fungi', 'vgg_flower',
         #                   'mscoco']
@@ -67,10 +69,11 @@ class Learner:
 
         return train_set, validation_set, test_set
 
-    """
-    Command line parser
-    """
-    def parse_command_line(self):
+    @staticmethod
+    def parse_command_line():
+        """
+        Command line parser
+        """
         parser = argparse.ArgumentParser()
 
         parser.add_argument("--data_path", default="../datasets", help="Path to dataset records.")
@@ -98,28 +101,36 @@ class Learner:
             if self.args.mode == 'train' or self.args.mode == 'train_test':
                 train_accuracies = []
                 losses = []
-                total_iterations = NUM_TRAIN_TASKS
-                for iteration in range(total_iterations):
-                    torch.set_grad_enabled(True)
-                    task_dict = self.metadataset.get_train_task(session)
-                    task_loss, task_accuracy = self.train_task(task_dict)
-                    train_accuracies.append(task_accuracy)
-                    losses.append(task_loss)
+                # Rounds up to next multiple so we log every n batches instead.
+                total_iterations = (NUM_TRAIN_TASKS + self.args.tasks_per_batch + 1) // self.args.tasks_per_batch
+                num_iters = NUM_TRAIN_TASKS // self.args.tasks_per_batch
+                validation_iters = VALIDATION_FREQUENCY // self.args.tasks_per_batch
+                log_iters = 1000 // self.args.tasks_per_batch
 
-                    # optimize
-                    if ((iteration + 1) % self.args.tasks_per_batch == 0) or (iteration == (total_iterations - 1)):
+                for iteration in range(num_iters):
+                    # Do batch iters.
+                    for _ in range(self.args.tasks_per_batch):
+                        torch.set_grad_enabled(True)
+                        task_dict = self.metadataset.get_train_task(session)
+                        task_loss, task_accuracy = self.train_task(task_dict)
+                        train_accuracies.append(task_accuracy)
+                        losses.append(task_loss)
+
+                        # optimize
                         self.optimizer.step()
                         self.optimizer.zero_grad()
 
-                    if (iteration + 1) % 1000 == 0:
+                    # Log every so often.
+                    if (iteration + 1) % log_iters == 0:
                         # print training stats
-                        print_and_log(self.logfile,'Task [{}/{}], Train Loss: {:.7f}, Train Accuracy: {:.7f}'
+                        print_and_log(self.logfile, 'Task [{}/{}], Train Loss: {:.7f}, Train Accuracy: {:.7f}'
                                       .format(iteration + 1, total_iterations, torch.Tensor(losses).mean().item(),
                                               torch.Tensor(train_accuracies).mean().item()))
                         train_accuracies = []
                         losses = []
 
-                    if ((iteration + 1) % VALIDATION_FREQUENCY == 0) and (iteration + 1) != total_iterations:
+                    # Validate when necessary.
+                    if ((iteration + 1) % validation_iters == 0) and (iteration + 1) != num_iters:
                         # validate
                         accuracy_dict = self.validate(session)
                         self.validation_accuracies.print(self.logfile, accuracy_dict)
@@ -127,8 +138,7 @@ class Learner:
                         if self.validation_accuracies.is_better(accuracy_dict):
                             self.validation_accuracies.replace(accuracy_dict)
                             torch.save(self.model.state_dict(), self.checkpoint_path_validation)
-                            print_and_log(self.logfile, 'Best validation model was updated.')
-                            print_and_log(self.logfile, '')
+                            print_and_log(self.logfile, 'Best validation model was updated.\n')
 
                 # save the final model
                 torch.save(self.model.state_dict(), self.checkpoint_path_final)
@@ -162,7 +172,7 @@ class Learner:
 
     def validate(self, session):
         with torch.no_grad():
-            accuracy_dict ={}
+            accuracy_dict = {}
             for item in self.validation_set:
                 accuracies = []
                 for _ in range(NUM_VALIDATION_TASKS):
@@ -183,8 +193,7 @@ class Learner:
     def test(self, path, session):
         self.model = self.init_model()
         self.model.load_state_dict(torch.load(path))
-        print_and_log(self.logfile, "")  # add a blank line
-        print_and_log(self.logfile, 'Testing model {0:}: '.format(path))
+        print_and_log(self.logfile, f"\nTesting model {path}: ")  # add a blank line
 
         with torch.no_grad():
             for item in self.test_set:
@@ -231,10 +240,8 @@ class Learner:
         return images[permutation], labels[permutation]
 
     def use_two_gpus(self):
-        use_two_gpus = False
-        if self.args.feature_adaptation == "film+ar":
-            use_two_gpus = True  # film+ar model does not fit on one GPU, so use model parallelism
-        return use_two_gpus
+        # film+ar model does not fit on one GPU, so use model parallelism
+        return self.args.feature_adaptation == "film+ar"
 
 
 if __name__ == "__main__":
