@@ -71,13 +71,8 @@ class MetaDatasetReader:
         dataset_spec = dataset_spec_lib.load_dataset_spec(dataset_records_path)
 
         # Enable ontology aware sampling for Omniglot and ImageNet.
-        use_bilevel_ontology = False
-        if 'omniglot' in dataset_name:
-            use_bilevel_ontology = True
-
-        use_dag_ontology = False
-        if 'ilsvrc_2012' in dataset_name:
-            use_dag_ontology = True
+        use_bilevel_ontology = 'omniglot' in dataset_name
+        use_dag_ontology = 'ilsvrc_2012' in dataset_name
 
         single_source_pipeline = pipeline.make_one_source_episode_pipeline(
             dataset_spec=dataset_spec,
@@ -119,8 +114,8 @@ class MetaDatasetReader:
             max_num_query=10,
             max_support_set_size=400,
             max_support_size_contrib_per_class=100,
-            min_log_weight=-0.69314718055994529, # np.log(0.5)
-            max_log_weight=0.69314718055994529, # np.log(2)
+            min_log_weight=-0.69314718055994529,  # np.log(0.5)
+            max_log_weight=0.69314718055994529,  # np.log(2)
             ignore_dag_ontology=False,
             ignore_bilevel_ontology=False
         )
@@ -135,8 +130,8 @@ class MetaDatasetReader:
             max_num_query=10,
             max_support_set_size=500,
             max_support_size_contrib_per_class=100,
-            min_log_weight=-0.69314718055994529, # np.log(0.5)
-            max_log_weight=0.69314718055994529, # np.log(2)
+            min_log_weight=-0.69314718055994529,  # np.log(0.5)
+            max_log_weight=0.69314718055994529,  # np.log(2)
             ignore_dag_ontology=False,
             ignore_bilevel_ontology=False
         )
