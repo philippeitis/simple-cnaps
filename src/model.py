@@ -6,7 +6,6 @@ from config_networks import ConfigureNetworks
 from set_encoder import mean_pooling
 import torch.nn.functional as F
 import numpy as np
-import networkx as nx
 import scipy.sparse as sp
 from scipy.sparse import csgraph
 
