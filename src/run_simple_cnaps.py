@@ -31,7 +31,7 @@ class Learner:
         print_and_log(self.logfile, "Options: %s\n" % self.args)
         print_and_log(self.logfile, "Checkpoint Directory: %s\n" % self.checkpoint_dir)
 
-        gpu_device = 'cuda:0'
+        gpu_device = f'cuda:{self.args.gpu}'
         self.device = torch.device(gpu_device if torch.cuda.is_available() else 'cpu')
         self.model = self.init_model()
         self.train_set, self.validation_set, self.test_set = self.init_data()
@@ -80,6 +80,7 @@ class Learner:
         parser.add_argument("--test_model_path", "-m", default=None, help="Path to model to load and test.")
         parser.add_argument("--feature_adaptation", choices=["no_adaptation", "film", "film+ar"], default="film+ar",
                             help="Method to adapt feature extractor parameters.")
+        parser.add_argument("--gpu", default=0, type=int, help="GPU index.")
 
         args = parser.parse_args()
 
