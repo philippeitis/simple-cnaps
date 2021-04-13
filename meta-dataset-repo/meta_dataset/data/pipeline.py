@@ -34,7 +34,6 @@ import functools
 from absl import logging
 import gin.tf
 from meta_dataset import data
-from meta_dataset.data import decoder
 from meta_dataset.data import learning_spec
 from meta_dataset.data import reader
 from meta_dataset.data import sampling
@@ -406,7 +405,8 @@ def make_one_source_episode_pipeline(dataset_spec,
                                      read_buffer_size_bytes=None,
                                      num_prefetch=0,
                                      image_size=None,
-                                     num_to_take=None):
+                                     num_to_take=None,
+                                     ignore_hierarchy_probability=0.0):
   """Returns a pipeline emitting data from one single source as Episodes.
 
   Args:
@@ -428,11 +428,15 @@ def make_one_source_episode_pipeline(dataset_spec,
     image_size: int, desired image size used during decoding.
     num_to_take: Optional, an int specifying a number of elements to pick from
       each class' tfrecord. If specified, the available images of each class
-      will be restricted to that int. By default no restriction is applied
-      and all data is used.
+      will be restricted to that int. By default no restriction is applied and
+      all data is used.
+    ignore_hierarchy_probability: Float, if using a hierarchy, this flag makes
+      the sampler ignore the hierarchy for this proportion of episodes and
+      instead sample categories uniformly.
 
   Returns:
-    A Dataset instance that outputs fully-assembled and decoded episodes.
+    A Dataset instance that outputs tuples of fully-assembled and decoded
+      episodes zipped with the ID of their data source of origin.
   """
   use_all_classes = False
   if pool is not None:
@@ -440,10 +444,12 @@ def make_one_source_episode_pipeline(dataset_spec,
       raise NotImplementedError('Example-level splits or pools not supported.')
   if num_to_take is None:
     num_to_take = -1
+
+  num_unique_descriptions = episode_descr_config.num_unique_descriptions
   episode_reader = reader.EpisodeReader(dataset_spec, split,
                                         shuffle_buffer_size,
                                         read_buffer_size_bytes, num_prefetch,
-                                        num_to_take)
+                                        num_to_take, num_unique_descriptions)
   sampler = sampling.EpisodeDescriptionSampler(
       episode_reader.dataset_spec,
       split,
@@ -454,15 +460,20 @@ def make_one_source_episode_pipeline(dataset_spec,
       use_all_classes=use_all_classes,
       ignore_hierarchy_probability=ignore_hierarchy_probability)
   dataset = episode_reader.create_dataset_input_pipeline(sampler, pool=pool)
-
   # Episodes coming out of `dataset` contain flushed examples and are internally
-  # padded with dummy examples. `process_episode` discards flushed examples,
-  # splits the episode into support and query sets, removes the dummy examples
-  # and decodes the example strings.
+  # padded with placeholder examples. `process_episode` discards flushed
+  # examples, splits the episode into support and query sets, removes the
+  # placeholder examples and decodes the example strings.
   chunk_sizes = sampler.compute_chunk_sizes()
   map_fn = functools.partial(
-      process_episode, chunk_sizes=chunk_sizes, image_size=image_size)
+      process_episode,
+      chunk_sizes=chunk_sizes,
+      image_size=image_size)
   dataset = dataset.map(map_fn)
+  # There is only one data source, so we know that all episodes belong to it,
+  # but for interface consistency, zip with a dataset identifying the source.
+  source_id_dataset = tf.data.Dataset.from_tensors(0).repeat()
+  dataset = tf.data.Dataset.zip((dataset, source_id_dataset))
 
   # Overlap episode processing and training.
   dataset = dataset.prefetch(1)
@@ -509,7 +520,8 @@ def make_multisource_episode_pipeline(dataset_spec_list,
       applied to any dataset and all data per class is used.
 
   Returns:
-    A Dataset instance that outputs fully-assembled and decoded episodes.
+    A Dataset instance that outputs tuples of fully-assembled and decoded
+      episodes zipped with the ID of their data source of origin.
   """
   if pool is not None:
     if not data.POOL_SUPPORTED:
@@ -519,14 +531,17 @@ def make_multisource_episode_pipeline(dataset_spec_list,
                      'dataset_spec_list.')
   if num_to_take is None:
     num_to_take = [-1] * len(dataset_spec_list)
+  num_unique_descriptions = episode_descr_config.num_unique_descriptions
   sources = []
-  for (dataset_spec, use_dag_ontology, use_bilevel_ontology,
-       num_to_take_for_dataset) in zip(dataset_spec_list, use_dag_ontology_list,
-                                       use_bilevel_ontology_list, num_to_take):
+  for source_id, (dataset_spec, use_dag_ontology, use_bilevel_ontology,
+                  num_to_take_for_dataset) in enumerate(
+                      zip(dataset_spec_list, use_dag_ontology_list,
+                          use_bilevel_ontology_list, num_to_take)):
     episode_reader = reader.EpisodeReader(dataset_spec, split,
                                           shuffle_buffer_size,
                                           read_buffer_size_bytes, num_prefetch,
-                                          num_to_take_for_dataset)
+                                          num_to_take_for_dataset,
+                                          num_unique_descriptions)
     sampler = sampling.EpisodeDescriptionSampler(
         episode_reader.dataset_spec,
         split,
@@ -535,18 +550,25 @@ def make_multisource_episode_pipeline(dataset_spec_list,
         use_dag_hierarchy=use_dag_ontology,
         use_bilevel_hierarchy=use_bilevel_ontology)
     dataset = episode_reader.create_dataset_input_pipeline(sampler, pool=pool)
-    sources.append(dataset)
+    # Create a dataset to zip with the above for identifying the source.
+    source_id_dataset = tf.data.Dataset.from_tensors(source_id).repeat()
+    sources.append(tf.data.Dataset.zip((dataset, source_id_dataset)))
 
-  # Sample uniformly among sources
+  # Sample uniformly among sources.
   dataset = tf.data.experimental.sample_from_datasets(sources)
 
   # Episodes coming out of `dataset` contain flushed examples and are internally
-  # padded with dummy examples. `process_episode` discards flushed examples,
-  # splits the episode into support and query sets, removes the dummy examples
-  # and decodes the example strings.
+  # padded with placeholder examples. `process_episode` discards
+  # flushed examples, splits the episode into support and query sets, removes
+  # the placeholder examples and decodes the example strings.
   chunk_sizes = sampler.compute_chunk_sizes()
-  map_fn = functools.partial(
-      process_episode, chunk_sizes=chunk_sizes, image_size=image_size)
+
+  def map_fn(episode, source_id):
+    return process_episode(
+        *episode,
+        chunk_sizes=chunk_sizes,
+        image_size=image_size), source_id
+
   dataset = dataset.map(map_fn)
 
   # Overlap episode processing and training.
@@ -598,13 +620,18 @@ def make_one_source_batch_pipeline(dataset_spec,
   map_fn = functools.partial(process_batch, image_size=image_size)
   dataset = dataset.map(map_fn)
 
+  # There is only one data source, so we know that all batches belong to it,
+  # but for interface consistency, zip with a dataset identifying the source.
+  source_id_dataset = tf.data.Dataset.from_tensors(0).repeat()
+  dataset = tf.data.Dataset.zip((dataset, source_id_dataset))
+
   # Overlap episode processing and training.
   dataset = dataset.prefetch(1)
   return dataset
 
 
 # TODO(lamblinp): Update this option's name
-@gin.configurable('BatchSplitReaderGetReader', whitelist=['add_dataset_offset'])
+@gin.configurable('BatchSplitReaderGetReader', allowlist=['add_dataset_offset'])
 def make_multisource_batch_pipeline(dataset_spec_list,
                                     split,
                                     batch_size,
