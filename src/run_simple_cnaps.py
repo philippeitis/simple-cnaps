@@ -54,11 +54,15 @@ class Learner:
 
     def init_data(self):
 
-        train_set = ['ilsvrc_2012', 'omniglot', 'aircraft', 'cu_birds', 'dtd', 'quickdraw', 'fungi', 'vgg_flower']
-        validation_set = ['ilsvrc_2012', 'omniglot', 'aircraft', 'cu_birds', 'dtd', 'quickdraw', 'fungi', 'vgg_flower',
-                          'mscoco']
-        test_set = ['ilsvrc_2012', 'omniglot', 'aircraft', 'cu_birds', 'dtd', 'quickdraw', 'fungi', 'vgg_flower',
-                    'traffic_sign', 'mscoco', 'mnist', 'cifar10', 'cifar100']
+        # train_set = ['ilsvrc_2012', 'omniglot', 'aircraft', 'cu_birds', 'dtd', 'quickdraw', 'fungi', 'vgg_flower']
+        # validation_set = ['ilsvrc_2012', 'omniglot', 'aircraft', 'cu_birds', 'dtd', 'quickdraw', 'fungi', 'vgg_flower',
+        #                   'mscoco']
+        # test_set = ['ilsvrc_2012', 'omniglot', 'aircraft', 'cu_birds', 'dtd', 'quickdraw', 'fungi', 'vgg_flower',
+        #             'traffic_sign', 'mscoco', 'mnist', 'cifar10', 'cifar100']
+
+        train_set = []
+        validation_set = []
+        test_set = ['mnist', 'cifar10', 'cifar100']
 
         return train_set, validation_set, test_set
 
