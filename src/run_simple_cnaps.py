@@ -89,6 +89,7 @@ class Learner:
         parser.add_argument("--feature_adaptation", choices=["no_adaptation", "film", "film+ar"], default="film+ar",
                             help="Method to adapt feature extractor parameters.")
         parser.add_argument("--gpu", default=0, type=int, help="GPU index.")
+        parser.add_argument("--augment", default=5, type=int, help="Number of additional points to augment.")
 
         args = parser.parse_args()
 
