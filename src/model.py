@@ -43,6 +43,7 @@ class SimpleCnaps(nn.Module):
         self.task_representation = None
         self.graph_node_values = None
         self.class_representations = OrderedDict()  # Dictionary mapping class label (integer) to encoded representation
+        self.context_features = None
         
         """
         SCM: in addition to saving class representations, Simple CNAPS uses a separate
@@ -59,19 +60,23 @@ class SimpleCnaps(nn.Module):
         :param target_images: (torch.tensor) Images in the target set (batch x C x H x W).
         :return: (torch.tensor) Categorical distribution on label set for each image in target set (batch x num_labels).
         """
+        num_context = context_images.size(0)
+        self.class_representations.clear()
+        self.class_precision_matrices.clear()
+        del self.context_features
 
         # extract train and test features
         self.task_representation = self.set_encoder(context_images)
-        context_features, target_features = self._get_features(context_images, target_images)
+        self.context_features, target_features = self._get_features(context_images, target_images)
 
         """
         SCM: we build both class representations and the regularized covariance estimates.
         """
         # get the class means and covariance estimates in tensor form
-        self._build_class_reps_and_covariance_estimates(context_features, context_labels)
+        self._build_class_reps_and_covariance_estimates(self.context_features, context_labels)
         class_means = torch.stack(list(self.class_representations.values())).squeeze(1)
         class_precision_matrices = torch.stack(list(self.class_precision_matrices.values()))
-
+        # print(target_images.shape)
         # grabbing the number of classes and query examples for easier use later in the function
         number_of_classes = class_means.size(0)
         number_of_targets = target_features.size(0)
@@ -89,8 +94,6 @@ class SimpleCnaps(nn.Module):
         sample_logits = torch.mul(first_half, repeated_difference).sum(dim=2).transpose(1,0) * -1
 
         # clear all dictionaries
-        self.class_representations.clear()
-        self.class_precision_matrices.clear()
 
         return split_first_dim_linear(sample_logits, [NUM_SAMPLES, target_images.shape[0]])
 

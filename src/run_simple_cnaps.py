@@ -3,10 +3,11 @@ import numpy as np
 import argparse
 import os
 import sys
+import random
 from utils import print_and_log, get_log_files, ValidationAccuracies, loss, aggregate_accuracy
 from model import SimpleCnaps
 from meta_dataset_reader import MetaDatasetReader
-
+from collections import Counter
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Quiet TensorFlow warnings
 import tensorflow as tf
 
@@ -60,14 +61,21 @@ class Learner:
         # train_set = ['ilsvrc_2012', 'omniglot', 'aircraft', 'cu_birds', 'dtd', 'quickdraw', 'fungi', 'vgg_flower']
         # validation_set = ['ilsvrc_2012', 'omniglot', 'aircraft', 'cu_birds', 'dtd', 'quickdraw', 'fungi', 'vgg_flower',
         #                   'mscoco']
-        # test_set = ['ilsvrc_2012', 'omniglot', 'aircraft', 'cu_birds', 'dtd', 'quickdraw', 'fungi', 'vgg_flower',
-        #             'traffic_sign', 'mscoco', 'mnist', 'cifar10', 'cifar100']
+        test_set = [
+            # 'ilsvrc_2012',
+            'omniglot', 'aircraft',
+            # 'cu_birds',
+            'dtd',
+            # 'quickdraw',
+            'fungi', 'vgg_flower', 'traffic_sign',
+                 #'mscoco',
+       'mnist', 'cifar10', 'cifar100']
 
-        train_set = []
+        train_set = ['dtd']
         validation_set = []
-        test_set = ['mnist', 'cifar10', 'cifar100']
+       # test_set = ['mnist', 'cifar10', 'cifar100']
 
-        return train_set, validation_set, test_set
+        return train_set, validation_set, ['cifar10', 'cifar100']
 
     @staticmethod
     def parse_command_line():
@@ -155,18 +163,21 @@ class Learner:
     def train_task(self, task_dict):
         context_images, target_images, context_labels, target_labels = self.prepare_task(task_dict)
 
-        target_logits = self.model(context_images, context_labels, target_images)
-        task_loss = self.loss(target_logits, target_labels, self.device) / self.args.tasks_per_batch
-        if self.args.feature_adaptation == 'film' or self.args.feature_adaptation == 'film+ar':
-            if self.use_two_gpus():
-                regularization_term = (self.model.feature_adaptation_network.regularization_term()).cuda(0)
-            else:
-                regularization_term = (self.model.feature_adaptation_network.regularization_term())
-            regularizer_scaling = 0.001
-            task_loss += regularizer_scaling * regularization_term
-        task_accuracy = self.accuracy_fn(target_logits, target_labels)
+        for i in range(0, 5):
+            target_logits = self.model(context_images, context_labels, target_images)
+            task_loss = self.loss(target_logits, target_labels, self.device) / self.args.tasks_per_batch
+            if self.args.feature_adaptation == 'film' or self.args.feature_adaptation == 'film+ar':
+                if self.use_two_gpus():
+                    regularization_term = (self.model.feature_adaptation_network.regularization_term()).cuda(0)
+                else:
+                    regularization_term = (self.model.feature_adaptation_network.regularization_term())
+                regularizer_scaling = 0.001
+                task_loss += regularizer_scaling * regularization_term
+            task_accuracy = self.accuracy_fn(target_logits, target_labels)
 
-        task_loss.backward(retain_graph=False)
+            task_loss.backward(retain_graph=False)
+            if target_logits.entropy() < 0.10:
+                break
 
         return task_loss, task_accuracy
 
@@ -190,7 +201,7 @@ class Learner:
 
         return accuracy_dict
 
-    def test(self, path, session):
+    def test(self, path, _session):
         self.model = self.init_model()
         self.model.load_state_dict(torch.load(path))
         print_and_log(self.logfile, f"\nTesting model {path}: ")  # add a blank line
@@ -199,13 +210,158 @@ class Learner:
             for item in self.test_set:
                 accuracies = []
                 for _ in range(NUM_TEST_TASKS):
-                    task_dict = self.metadataset.get_test_task(item, session)
+                    task_dict = self.metadataset.get_test_task(item, _session)
                     context_images, target_images, context_labels, target_labels = self.prepare_task(task_dict)
-                    target_logits = self.model(context_images, context_labels, target_images)
+                    selected_class_indices = {}
+                    unselected_class_indices = {}
+                    random_select = {}
+                    random_unselect = {}
+                    for c in torch.unique(context_labels):
+                        class_mask = torch.eq(context_labels, c)  # binary mask of labels equal to which_class
+                        class_mask_indices = torch.nonzero(class_mask)  # indices of labels equal to which class
+                        # reshape to be a 1D vector
+                        indices = torch.torch.reshape(class_mask_indices, (-1,)).tolist()
+                        length = max(len(indices) // 10, min(len(indices), 1))
+                        selected_class_indices[c.item()] = indices[:length]
+                        unselected_class_indices[c.item()] = indices[length:]
+                        indices = list(indices)
+                        random.shuffle(indices)
+                        random_select[c.item()] = indices[:length]
+                        random_unselect[c.item()] = indices[length:]
+                        del c
+
+                    # print(selected_class_indices)
+                    i = 15
+                    target_logits, selected_indices, selected_images, selected_labels = None, None, None, None
+                    while True:
+                        if target_logits is not None:
+                            del selected_indices
+                            del selected_images
+                            del selected_labels
+                            del target_logits
+
+                        selected_indices = []
+                        for indices in selected_class_indices.values():
+                            selected_indices.extend(indices)
+
+                        selected_indices = torch.LongTensor(selected_indices).to(self.device)
+                        selected_images = torch.index_select(context_images, 0, selected_indices)
+                        selected_labels = torch.index_select(context_labels, 0, selected_indices)
+                        target_logits = self.model(selected_images, selected_labels, target_images)
+
+                        i -= 1
+
+                        entropy_sum = 0.
+                        for row in torch.transpose(target_logits, 0, 1):
+                       #      print(entropy_sum, row, target_logits.shape)
+                            entropy_sum += torch.distributions.Categorical(logits=row).entropy().item()
+
+                        if entropy_sum < 0.25 * len(selected_indices) or i == 0:
+                            break
+
+                        weights = {}
+                        for classx in selected_class_indices.keys():
+                            if unselected_class_indices[classx]:
+                                class_mask = torch.eq(selected_labels, classx)  # binary mask of labels equal to which_class
+                                class_mask_indices = torch.torch.reshape(torch.nonzero(class_mask), (-1,))  # indices of labels equal to which class
+                                # reshape to be a 1D vector
+
+                                class_var = torch.index_select(
+                                    self.model.context_features, 0, class_mask_indices
+                                ).var()
+                                # Close to 1 for low # of items
+                                size_regularizer = 1. / ((class_mask_indices.shape[0]/4.) ** 2 + 1.0)
+                                weights[classx] = (torch.sum(target_logits[:, classx, :]) * (class_var + size_regularizer)).item() #, class_var)
+                        if not weights:
+                            break
+                        # Exploration
+#                        if random.random() > np.exp(-i/5.):
+#                            classx, tup = min(weights.items(), key=lambda x: x[1])
+#                        else:
+#                            classx, tup = random.choice(list(weights.items()))
+                        context_size = max(context_images.shape[0] // 20, 1)
+                        sampling_from = list(weights.keys()) 
+                        unread = sum([len(x) for x in unselected_class_indices.values()])
+                        if unread > context_size:
+                            to_sample = context_size
+                            while to_sample != 0:
+                                values = list(weights.values())
+                                #print(values)
+                                values = np.exp(np.array(values) / min(values))
+                                values /= sum(values)
+                                dist = torch.distributions.Categorical(probs=torch.FloatTensor(list(values)))
+                                vals = dist.sample(torch.Size([to_sample]))
+                                #print(vals, weights, to_sample, dist.probs)
+                                for val in vals:
+                                    indices = unselected_class_indices[sampling_from[val.item()]]
+                                    if indices:
+                                        to_sample -= 1
+                                        selected_class_indices[classx].append(indices.pop())
+                            select_left = context_size
+                            while select_left != 0:
+                                index = np.random.randint(len(selected_class_indices))
+                                if random_unselect[index]:
+                                    random_select[index].append(random_unselect[index].pop())
+                                    select_left -= 1
+                        else:
+                            for classx, indices in unselected_class_indices.items():
+                                selected_class_indices[classx].extend(indices)
+                                indices.clear()
+                                random_select[classx].extend(random_unselect[classx])
+                                random_unselect[classx].clear()
+
+                        # indices = unselected_class_indices[classx]
+                               # length = max(int((first_len + len(indices)) * percentage), min(len(indices), 1))
+                        #del unselected_class_indices[classx][:length]
+                        # var = tup[1]
+                        # Add up to 40% of available images depending on variance
+                        #percentage = 0.4 / (1.0 + np.exp(-var.item()))
+
+                        # print(l1, len(unselected_class_indices[classx]))
                     accuracy = self.accuracy_fn(target_logits, target_labels)
                     accuracies.append(accuracy.item())
-                    del target_logits
 
+                    fractions = [0, 0, 1/4, 1/2, 3/4, 1]
+                    fraction_indices = [[] for _ in fractions]
+                    for classx, indices in selected_class_indices.items():
+                        all_indices = indices + unselected_class_indices[classx]
+                        for i, fraction in enumerate(fractions):
+                            random.shuffle(all_indices)
+                            fraction_indices[i] += all_indices[:max(int(len(all_indices) * fraction), 1)]
+                    fraction_indices[0] = [item for sublist in random_select.values() for item in sublist]
+                    fraction_indices = [torch.LongTensor(fi).to(self.device) for fi in fraction_indices]
+                    fraction_images = [torch.index_select(context_images, 0, fi) for fi in fraction_indices]
+                    fraction_labels = [torch.index_select(context_labels, 0, fi) for fi in fraction_indices]
+                    fraction_logits = [self.model(images, labels, target_images) for images, labels in zip(fraction_images, fraction_labels)]
+                    fraction_accuracy = [self.accuracy_fn(logits, target_labels) for logits in fraction_logits]
+                    fraction_names = ["RPAR", "SING", "QUAR", "HALF", "TQUA", "FULL"]
+
+                    selections = [
+                        ("PART", accuracy.item(), selected_indices.shape[0]),
+                    ] + [(name, acc.item(), ims.shape[0]) for name, acc, ims in zip(fraction_names, fraction_accuracy, fraction_images)]
+
+                    # print(context_images.shape)
+                    print(f"{selections[0][0]}: {selections[0][1]:.4f} | {selections[0][2]:04} | {i:04} | {entropy_sum:07.3f}")
+                    for selection in selections[1:]:
+                        print(f"{selection[0]}: {selection[1]:.4f} | {selection[2]:04}")
+                    selections = [(x[0], x[1] / x[2], x[1]) for x in selections]
+                    selections.sort(key=lambda x: -x[1])
+                    print(" ".join([f"{x[0]}: {x[1]:04f}" for x in selections]))
+                    selections.sort(key=lambda x: -x[2])
+                    print(" ".join([f"{x[0]}: {x[2]:04f}" for x in selections]))
+                    for _ in range(len(fraction_indices)):
+                        itemx = fraction_indices.pop()
+                        del itemx
+                        itemx = fraction_images.pop()
+                        del itemx
+                        itemx = fraction_labels.pop()
+                        del itemx
+                        itemx = fraction_logits.pop()
+                        del itemx
+                        itemx = fraction_accuracy.pop()
+                        del itemx
+                    del target_logits
+                    del target_labels
                 accuracy = np.array(accuracies).mean() * 100.0
                 accuracy_confidence = (196.0 * np.array(accuracies).std()) / np.sqrt(len(accuracies))
 
