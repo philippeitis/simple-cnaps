@@ -75,7 +75,7 @@ class Learner:
         validation_set = []
        # test_set = ['mnist', 'cifar10', 'cifar100']
 
-        return train_set, validation_set, ['cifar10', 'cifar100']
+        return train_set, validation_set, test_set
 
     @staticmethod
     def parse_command_line():
